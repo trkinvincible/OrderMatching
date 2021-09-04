@@ -61,6 +61,8 @@ class Order;
 
 template<const char* SIDE>
 using Order_ptr = std::shared_ptr<Order<SIDE>>;
+using SellOrder_ptr = Order_ptr<SellSide>;
+using BuyOrder_ptr = Order_ptr<BuySide>;
 
 template<const char* SIDE>
 class Order{
@@ -154,14 +156,14 @@ public:
 class SellOrderBookKeeping{
 
     struct comp {
-        bool operator()(const Order_ptr<SellSide>& lhs, const Order_ptr<SellSide>& rhs) const {
+        bool operator()(const SellOrder_ptr& lhs, const SellOrder_ptr& rhs) const {
             return (lhs->mPrice < rhs->mPrice);
         }
     };
-    using BestPriceSellOrdersSet = std::set<Order_ptr<SellSide>, comp>;
+    using BestPriceSellOrdersSet = std::set<SellOrder_ptr, comp>;
     using BestSellPriceForSymbolHash = std::unordered_map<std::string_view/*symbol*/, BestPriceSellOrdersSet>;
     using BestSellPriceAtTimePointMap = std::map<std::uint64_t/*timestamp*/, BestSellPriceForSymbolHash>;
-    using MessageType = std::tuple<Order_ptr<SellSide>, bool>;
+    using MessageType = std::tuple<SellOrder_ptr, bool>;
 
 public:
     bool Process(){
@@ -181,7 +183,7 @@ public:
         }
     }
 
-    void AddMessage(const Order_ptr<SellSide> newOrder, const bool isInsert = true){
+    void AddMessage(const SellOrder_ptr newOrder, const bool isInsert = true){
         std::unique_lock<std::mutex> lk(mMessageBoxMutex);
         mMessageBoxCondVar.wait(lk, [this]{ return mMessageBox.empty(); });
         mMessageBox.push_back(std::make_tuple(newOrder, isInsert));
@@ -194,7 +196,7 @@ public:
     }
 
 private:
-    inline void DoSellOrderInsert(const Order_ptr<SellSide>& newOrder){
+    inline void DoSellOrderInsert(const SellOrder_ptr& newOrder){
 
         if (mLookupBestSellPrice.empty()){
             BestSellPriceForSymbolHash& second = mLookupBestSellPrice[newOrder->mTimestamp];
@@ -207,7 +209,7 @@ private:
         }
     }
 
-    inline void DoSellOrderCXL(const Order_ptr<SellSide>& newOrder){
+    inline void DoSellOrderCXL(const SellOrder_ptr& newOrder){
         if (mLookupBestSellPrice.empty()){
             // Invalid: ignore
         }else{
@@ -215,7 +217,7 @@ private:
             const auto [it, success] = mLookupBestSellPrice.insert({newOrder->mTimestamp, prevTS});
             BestSellPriceForSymbolHash& newTS = it->second;
             auto& st = newTS[newOrder->mSymbol];
-            auto itr = std::find_if(st.begin(), st.end(), [newOrder](const Order_ptr<SellSide>& i) {
+            auto itr = std::find_if(st.begin(), st.end(), [newOrder](const SellOrder_ptr& i) {
                 return (i->mOrderID == newOrder->mOrderID);
             });
             if (itr != st.end())
@@ -249,7 +251,7 @@ public:
             auto firstKeyItr = mBuyOrders.begin();
             for (auto currItr = firstKeyItr; currItr != mBuyOrders.end(); ) {
                 // TODO Must be optimized with single call for composite key(fat key)
-                Order_ptr<BuySide> tmp = std::make_shared<Order<BuySide>>((*currItr)->mSymbol, UINT64_MAX);
+                BuyOrder_ptr tmp = std::make_shared<Order<BuySide>>((*currItr)->mSymbol, UINT64_MAX);
                 const auto lb = mBuyOrders.lower_bound(tmp);
                 tmp->mVolume = 0;
                 const auto ub = mBuyOrders.upper_bound(tmp);
@@ -261,7 +263,7 @@ public:
         if (!mSellOrders.empty()){
             auto firstKeyItr = mSellOrders.begin();
             for (auto currItr = firstKeyItr; currItr != mSellOrders.end(); ) {
-                Order_ptr<SellSide> tmp = std::make_shared<Order<SellSide>>((*currItr)->mSymbol);
+                SellOrder_ptr tmp = std::make_shared<Order<SellSide>>((*currItr)->mSymbol);
                 const auto [lb, ub] = mSellOrders.equal_range(tmp);
                 ret[(*lb)->mSymbol] += std::distance(lb, ub);
                 currItr = ub;
@@ -275,11 +277,11 @@ public:
      * Since the BUY orders in OB are sorted in descending order of hash(symbols, volumes) its takes (log + constant) time to take from top
      * designed for end of trade day
     */
-    std::vector<Order_ptr<BuySide>> BiggestBuyOrders(const std::string& symbol, const int top){
+    std::vector<BuyOrder_ptr> BiggestBuyOrders(const std::string& symbol, const int top){
 
-        std::vector<Order_ptr<BuySide>> ret;
+        std::vector<BuyOrder_ptr> ret;
         ret.reserve(top);
-        Order_ptr<BuySide> tmp = std::make_shared<Order<BuySide>>(symbol, UINT64_MAX);
+        BuyOrder_ptr tmp = std::make_shared<Order<BuySide>>(symbol, UINT64_MAX);
         const auto lb = mBuyOrders.lower_bound(tmp);
         tmp->mVolume = 0;
         const auto ub = mBuyOrders.upper_bound(tmp);
@@ -323,17 +325,17 @@ public:
      *
      *  Implementing #1 for now at constant time complexity O(1)
     */
-    Order_ptr<SellSide> BestSellAtTime(const std::string& symbol, const std::string& timestamp){
+    SellOrder_ptr BestSellAtTime(const std::string& symbol, const std::string& timestamp){
 
-        Order_ptr<SellSide> minOrder;
+        SellOrder_ptr minOrder;
         // Below code is to query at the end of trade day
 #if 0
         double minPrice = std::numeric_limits<double>::max();
-        Order_ptr<SellSide> tmp = std::make_shared<Order<SellSide>>(symbol);
+        SellOrder_ptr tmp = std::make_shared<Order<SellSide>>(symbol);
         const auto [lb, ub] = mSellOrders.equal_range(tmp);
         std::uint64_t ts = getTime(timestamp) - mMidNightInMS;
         // std::find_if performs better than std::min_element
-        std::find_if(lb, ub, [ts, &minPrice, &minOrder](const Order_ptr<SellSide>& item){
+        std::find_if(lb, ub, [ts, &minPrice, &minOrder](const SellOrder_ptr& item){
 
             if (item->mTimestamp > ts)
                 return true;
@@ -360,31 +362,31 @@ public:
     /* CORE APIS [END] */
 
     // BUY
-    inline void DoBuyOrderInsert(const Order_ptr<BuySide>& newOrder){
+    inline void DoBuyOrderInsert(const BuyOrder_ptr& newOrder){
         auto itr = mBuyOrders.insert(newOrder);
         mLookupBuyOrders[newOrder->mOrderID] = itr;
     }
 
-    inline void DoBuyOrderCXL(const Order_ptr<BuySide>& newOrder){
+    inline void DoBuyOrderCXL(const BuyOrder_ptr& newOrder){
         auto Buyitr = mLookupBuyOrders.find(newOrder->mOrderID);
         if (Buyitr != mLookupBuyOrders.end()){
             mBuyOrders.erase(Buyitr->second);
         }
     }
 
-    inline void DoBuyOrderCRP(const Order_ptr<BuySide>& newOrder){
+    inline void DoBuyOrderCRP(const BuyOrder_ptr& newOrder){
         DoBuyOrderCXL(newOrder);
         DoBuyOrderInsert(newOrder);
     }
 
     // SELL
-    inline void DoSellOrderInsert(const Order_ptr<SellSide>& newOrder){
+    inline void DoSellOrderInsert(const SellOrder_ptr& newOrder){
         mBookKeeper.AddMessage(newOrder);
         auto itr = mSellOrders.insert(newOrder);
         mLookupSellOrders[newOrder->mOrderID] = itr;
     }
 
-    inline void DoSellOrderCXL(const Order_ptr<SellSide>& newOrder){
+    inline void DoSellOrderCXL(const SellOrder_ptr& newOrder){
         mBookKeeper.AddMessage(newOrder, false);
         auto Sellitr = mLookupSellOrders.find(newOrder->mOrderID);
         if (Sellitr != mLookupSellOrders.end()){
@@ -392,7 +394,7 @@ public:
         }
     }
 
-    inline void DoSellOrderCRP(const Order_ptr<SellSide>& newOrder){
+    inline void DoSellOrderCRP(const SellOrder_ptr& newOrder){
         // Do not modify the pointer. choronologial order will be lost so operator= is deleted
         DoSellOrderCXL(newOrder);
         DoSellOrderInsert(newOrder);
@@ -485,7 +487,7 @@ public:
 
         start = std::chrono::steady_clock::now();
         std::cout << "top 3 BiggestBuyOrders for DVAM1: " << std::endl;
-        for (const Order_ptr<BuySide>& i : mOB.BiggestBuyOrders("DVAM1", 3)){
+        for (const BuyOrder_ptr& i : mOB.BiggestBuyOrders("DVAM1", 3)){
             std::cout << "Order ID: " << i->mOrderID << " Volume: " << i->mVolume << std::endl;
         }
         end = std::chrono::steady_clock::now();
@@ -493,7 +495,7 @@ public:
 
         start = std::chrono::steady_clock::now();
         std::cout << "BestSellAtTime for TEST0 unitl 15:30:00: " << std::endl;
-        const Order_ptr<SellSide>& s = mOB.BestSellAtTime("TEST0", "15:30:00");
+        const SellOrder_ptr& s = mOB.BestSellAtTime("TEST0", "15:30:00");
         if (!s){
             std::cout << "TEST0 has been cancelled or never placed until 15:30:00" << std::endl;
         }else{
@@ -509,7 +511,7 @@ private:
         // non-type template parameter to seperate out buy/sell side at compile time.
         if (IsBuy(v[4])){
 
-            Order_ptr<BuySide> o = mOB.GetNewOrder<BuySide>(v);
+            BuyOrder_ptr o = mOB.GetNewOrder<BuySide>(v);
             if (IsInsert(v[3])){
                 mOB.DoBuyOrderInsert(o);
             }else if (IsCancel(v[3])){
@@ -519,7 +521,7 @@ private:
             }
         }else{
 
-            Order_ptr<SellSide> o = mOB.GetNewOrder<SellSide>(v);
+            SellOrder_ptr o = mOB.GetNewOrder<SellSide>(v);
             if (IsInsert(v[3])){
                 mOB.DoSellOrderInsert(o);
             }else if (IsCancel(v[3])){
