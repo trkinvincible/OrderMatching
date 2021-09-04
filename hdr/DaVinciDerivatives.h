@@ -213,13 +213,9 @@ private:
             const auto [it, success] = mLookupBestSellPrice.insert({newOrder->mTimestamp, prevTS});
             BestSellPriceForSymbolHash& newTS = it->second;
             auto& st = newTS[newOrder->mSymbol];
-            for(auto it = st.begin(); it != st.end(); ) {
-                if((*it)->mOrderID == newOrder->mOrderID){
-                    it = st.erase(it);
-                }else{
-                    ++it;
-                }
-            }
+            std::find_if(st.begin(), st.end(), [newOrder](const Order_ptr<SellSide>& i) {
+                return (i->mOrderID == newOrder->mOrderID);
+            });
         }
     }
 
@@ -273,6 +269,7 @@ public:
 
     /*
      * Since the BUY orders in OB are sorted in descending order of hash(symbols, volumes) its takes (log + constant) time to take from top
+     * designed for end of trade day
     */
     std::vector<Order_ptr<BuySide>> BiggestBuyOrders(const std::string& symbol, const int top){
 
@@ -436,7 +433,7 @@ private:
         }
     }
 
-    // reduced timestamp size by calculating from midnight instead of time_since_epoch in microseconds for accuracy
+    // reduced timestamp size by calculating from midnight(or even market start better?) instead of time_since_epoch in microseconds for accuracy
     const std::uint64_t mMidNightInMS = getTime("00:00:00");
     // BST for storage and hash map for fast look up.
     OrdersContainer<BuySide>  mBuyOrders;
