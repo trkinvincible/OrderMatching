@@ -27,6 +27,8 @@
 
 namespace {
 
+using namespace std::literals;
+
 // just one copy for all orders :-)
 const char BuySide[] = "BUY";
 const char SellSide[] = "SELL";
@@ -192,6 +194,9 @@ public:
     }
 
     BestSellPriceAtTimePointMap::iterator GetBestSell(std::uint64_t ts) {
+        while (!mMessageBox.empty()) {
+            std::this_thread::sleep_for(5ms);
+        }
         return mLookupBestSellPrice.lower_bound(ts);;
     }
 
@@ -456,8 +461,6 @@ class DaVinciOrderMatchingEngine : public Command
 public:
     void execute(){
 
-        using namespace std::literals;
-
         // Eg: 14:17:21.877391;DVAM1;00000001;I;BUY;100;12.5
         static const std::string file{"../DaVinci_test_data.txt"};  // SSO
         std::ifstream input;
@@ -510,7 +513,6 @@ private:
 
         // non-type template parameter to seperate out buy/sell side at compile time.
         if (IsBuy(v[4])){
-
             BuyOrder_ptr o = mOB.GetNewOrder<BuySide>(v);
             if (IsInsert(v[3])){
                 mOB.DoBuyOrderInsert(o);
@@ -520,7 +522,6 @@ private:
                 mOB.DoBuyOrderCRP(o);
             }
         }else{
-
             SellOrder_ptr o = mOB.GetNewOrder<SellSide>(v);
             if (IsInsert(v[3])){
                 mOB.DoSellOrderInsert(o);
