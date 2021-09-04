@@ -67,9 +67,10 @@ class Order{
 
 public:
     Order(std::uint64_t ts, std::string s, std::uint32_t oid, uint64_t v, double p) noexcept
-        : mTimestamp(ts), mSymbol(s), mOrderID(oid), mVolume(v), mPrice(p) { }
+        : mTimestamp(ts), mSymbol(s), mSymbolHash(std::hash<std::string>{}(mSymbol)), mOrderID(oid), mVolume(v), mPrice(p) { }
 
-    Order(std::string s, uint64_t v = 0) noexcept :mSymbol(s), mVolume(v) { }
+    Order(std::string s, uint64_t v = 0) noexcept
+        :mSymbol(s), mSymbolHash(std::hash<std::string>{}(mSymbol)), mVolume(v) { }
     Order<SIDE>& operator=(const Order& rhs) = delete;
 
     friend bool operator<(const Order_ptr<SIDE>& lhs, const Order_ptr<SIDE>& rhs){
@@ -88,13 +89,13 @@ public:
     */
     bool Compare(const Order_ptr<SIDE>& rhs) const {
         if (IsBuyOrder()){
-            if (mSymbol == rhs->mSymbol){
+            if (mSymbolHash == rhs->mSymbolHash){
                 return mVolume > rhs->mVolume;
             }
-            return mSymbol < rhs->mSymbol;
+            return mSymbolHash < rhs->mSymbolHash;
         }else{
             // assume the input is chronologically ordered
-            return mSymbol < rhs->mSymbol;
+            return mSymbolHash < rhs->mSymbolHash;
         }
     }
 
@@ -123,6 +124,7 @@ public:
     // declare private with getter/setter
     std::uint64_t mTimestamp;
     std::string mSymbol; //[PK]
+    std::uint32_t mSymbolHash;
     std::uint32_t mOrderID;//[UNIQUE_KEY]
     const char* mSide = SIDE;
     uint64_t mVolume; //[PK + Composite Key]
@@ -400,7 +402,7 @@ public:
     Order_ptr<SIDE> GetNewOrder(const std::vector<std::string>& v) noexcept{
 
         std::uint64_t time_since_start_of_day_ms = getTime(v[0]) - mMidNightInMS;
-        return std::make_shared<Order<SIDE>>(time_since_start_of_day_ms, v[1], (std::uint64_t)std::atoi(v[2].data()),
+        return std::make_shared<Order<SIDE>>(time_since_start_of_day_ms, std::move(v[1]), (std::uint64_t)std::atoi(v[2].data()),
                                               (std::uint64_t)std::atoi(v[5].data()), (double)std::stod(v[6].data()));
     }
 
@@ -452,35 +454,44 @@ class DaVinciOrderMatchingEngine : public Command
 public:
     void execute(){
 
+        using namespace std::literals;
+
         // Eg: 14:17:21.877391;DVAM1;00000001;I;BUY;100;12.5
         static const std::string file{"../DaVinci_test_data.txt"};  // SSO
         std::ifstream input;
         try{
             input.open(file);
+            auto start = std::chrono::steady_clock::now();
             for (std::string line; std::getline(input, line, '\n'); ) {
                 const auto& v = Split(line, ";");
                 assert(v.size() == 7);
                 DoOrder(v);
             }
+            auto end = std::chrono::steady_clock::now();
+            std::cout << "Time to complete data file processing: " << (end - start)/1s << "s." << std::endl;
         }catch (...) {
             input.close();
         }
 
         input.close();
 
-        std::cout << "API 1" << std::endl;
+        auto start = std::chrono::steady_clock::now();
         std::cout << "OrderCounts: " << std::endl;
         for (const auto& i : mOB.OrderCounts()){
             std::cout << "Symbol: " << i.first << " Count: " << i.second << std::endl;
         }
+        auto end = std::chrono::steady_clock::now();
+        std::cout << "API 1 completed in : " << std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() << "µs." << std::endl;
 
-        std::cout << "API 2" << std::endl;
+        start = std::chrono::steady_clock::now();
         std::cout << "top 3 BiggestBuyOrders for DVAM1: " << std::endl;
         for (const Order_ptr<BuySide>& i : mOB.BiggestBuyOrders("DVAM1", 3)){
             std::cout << "Order ID: " << i->mOrderID << " Volume: " << i->mVolume << std::endl;
         }
+        end = std::chrono::steady_clock::now();
+        std::cout << "API 2 completed in : " << std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() << "µs." << std::endl;
 
-        std::cout << "API 3" << std::endl;
+        start = std::chrono::steady_clock::now();
         std::cout << "BestSellAtTime for TEST0 unitl 15:30:00: " << std::endl;
         const Order_ptr<SellSide>& s = mOB.BestSellAtTime("TEST0", "15:30:00");
         if (!s){
@@ -488,6 +499,8 @@ public:
         }else{
             std::cout << "Sell Price: " << s->mPrice << " Volume: " << s->mVolume << std::endl;
         }
+        end = std::chrono::steady_clock::now();
+        std::cout << "API 3 completed in : " << std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() << "µs." << std::endl;
     }
 
 private:
