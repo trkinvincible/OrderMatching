@@ -216,7 +216,8 @@ private:
             auto itr = std::find_if(st.begin(), st.end(), [newOrder](const Order_ptr<SellSide>& i) {
                 return (i->mOrderID == newOrder->mOrderID);
             });
-            st.erase(itr);
+            if (itr != st.end())
+                st.erase(itr);
         }
     }
 
