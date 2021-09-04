@@ -213,9 +213,10 @@ private:
             const auto [it, success] = mLookupBestSellPrice.insert({newOrder->mTimestamp, prevTS});
             BestSellPriceForSymbolHash& newTS = it->second;
             auto& st = newTS[newOrder->mSymbol];
-            std::find_if(st.begin(), st.end(), [newOrder](const Order_ptr<SellSide>& i) {
+            auto itr = std::find_if(st.begin(), st.end(), [newOrder](const Order_ptr<SellSide>& i) {
                 return (i->mOrderID == newOrder->mOrderID);
             });
+            st.erase(itr);
         }
     }
 
