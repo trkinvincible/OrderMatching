@@ -34,20 +34,16 @@ const char BuySide[] = "BUY";
 const char SellSide[] = "SELL";
 const char dummy[] = "dummy";
 
-std::vector<std::string> Split(const std::string& input, const std::string& delimiter){
+std::vector<std::string> Split(const std::string& input, const char delimiter){
 
-    std::vector<std::string> ret;
-    std::stringstream ss;
-    ss << "[^\\" << delimiter << "]+";
-    std::regex r(ss.str());
-
-    for (std::sregex_iterator i = std::sregex_iterator(input.begin(), input.end(), r);
-         i != std::sregex_iterator(); ++i){
-        std::smatch m = *i;
-        ret.push_back(m.str());
+    std::vector<std::string> result;
+    std::stringstream ss(input);
+    std::string s;
+    while (std::getline(ss, s, delimiter)) {
+        result.push_back(s);
     }
 
-    return ret;
+    return result;
 }
 
 template <typename SIDE>
@@ -179,15 +175,16 @@ public:
             }else{
                 DoSellOrderCXL(o);
             }
-            lk.unlock();
             mMessageBox.pop_front();
+            lk.unlock();
             mMessageBoxCondVar.notify_one();
         }
     }
 
     void AddMessage(const SellOrder_ptr newOrder, const bool isInsert = true){
         std::unique_lock<std::mutex> lk(mMessageBoxMutex);
-        mMessageBoxCondVar.wait(lk, [this]{ return mMessageBox.empty(); });
+        if (!lk.owns_lock())
+            mMessageBoxCondVar.wait(lk);
         mMessageBox.push_back(std::make_tuple(newOrder, isInsert));
         lk.unlock();
         mMessageBoxCondVar.notify_one();
@@ -195,12 +192,12 @@ public:
 
     BestSellPriceAtTimePointMap::iterator GetBestSell(std::uint64_t ts) {
         while (!mMessageBox.empty()) {
-            std::this_thread::sleep_for(5ms);
+            std::this_thread::sleep_for(1ms);
         }
         return mLookupBestSellPrice.lower_bound(ts);;
     }
 
-private:
+public:
     inline void DoSellOrderInsert(const SellOrder_ptr& newOrder){
 
         if (mLookupBestSellPrice.empty()){
@@ -420,7 +417,7 @@ private:
     std::uint64_t getTime(const std::string& t) noexcept{
 
         // Eg: 14:17:21.877391
-        const auto& v = Split(t, ".");
+        const auto& v = Split(t, '.');
         std::istringstream ss(v[0]);
         time_t tmp{0};
         struct tm tmm = *localtime(&tmp);
@@ -468,7 +465,7 @@ public:
             input.open(file);
             auto start = std::chrono::steady_clock::now();
             for (std::string line; std::getline(input, line, '\n'); ) {
-                const auto& v = Split(line, ";");
+                const auto& v = Split(line, ';');
                 assert(v.size() == 7);
                 DoOrder(v);
             }
